@@ -15,6 +15,7 @@ type ChessboardProps = {
   lastMove?: { from: string; to: string } | null;
   floatingBadge?: FloatingBadge | null;
   checkSquare?: string | null;
+  allowedTargets?: string[] | null;
   onMove: (from: string, to: string) => void;
   compact?: boolean;
 };
@@ -31,7 +32,7 @@ function squareAtPoint(rect: DOMRect, clientX: number, clientY: number) {
   return `${FILES[file]}${8 - row}`;
 }
 
-export function Chessboard({ fen, lastMove, floatingBadge, checkSquare, onMove, compact = false }: ChessboardProps) {
+export function Chessboard({ fen, lastMove, floatingBadge, checkSquare, allowedTargets, onMove, compact = false }: ChessboardProps) {
   const game = useMemo(() => new Chess(fen), [fen]);
   const boardRef = useRef<HTMLDivElement>(null);
   const previousFenRef = useRef(fen);
@@ -44,7 +45,7 @@ export function Chessboard({ fen, lastMove, floatingBadge, checkSquare, onMove, 
     if (!selected) return [] as any[];
     try { return game.moves({ square: selected as any, verbose: true }) as any[]; } catch { return []; }
   }, [game, selected]);
-  const legalTargets = useMemo(() => new Set(legalMoves.map((move) => move.to)), [legalMoves]);
+  const legalTargets = useMemo(() => new Set(legalMoves.filter((move) => allowedTargets === undefined || allowedTargets === null || allowedTargets.includes(move.to)).map((move) => move.to)), [allowedTargets, legalMoves]);
   const selectedPiece = selected ? (game.get(selected as any) as any) : null;
   const dragPiece = drag ? (game.get(drag.from as any) as any) : null;
 
@@ -124,7 +125,7 @@ export function Chessboard({ fen, lastMove, floatingBadge, checkSquare, onMove, 
     <div className={`board-shell relative w-full ${compact ? "max-w-[480px]" : "max-w-[640px]"}`}>
       <div
         ref={boardRef}
-        className="relative grid aspect-square w-full touch-none select-none overflow-hidden rounded-[10px] border border-black/60 shadow-[0_22px_60px_rgba(0,0,0,.35)]"
+        className="relative grid aspect-square w-full grid-cols-8 grid-rows-8 touch-none select-none overflow-hidden rounded-[10px] border border-black/60 shadow-[0_22px_60px_rgba(0,0,0,.35)]"
         onPointerMove={moveDrag}
         onPointerUp={endDrag}
         onPointerCancel={() => { setDrag(null); setSelected(null); }}
