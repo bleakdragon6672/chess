@@ -1,0 +1,5 @@
+Stockfish.js 19 Lite Single
+
+These runtime assets are distributed under the GNU General Public License v3.
+Upstream source: https://github.com/nmrugg/stockfish.js
+Release: v19.0.1
