@@ -194,6 +194,35 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fen, activeTab, vsBot, selectedBot.id, botThinking, currentIndex, moves.length]);
 
+  // Never leave a match waiting forever if a browser blocks WASM, a worker
+  // fails to initialise, or a search is interrupted by navigation. A legal
+  // profile-aware move keeps the game playable while engine analysis remains
+  // an enhancement rather than a hard dependency.
+  useEffect(() => {
+    if (!botThinking || !vsBot || activeTab !== "play" || currentIndex !== moves.length) return;
+    const safetyTimer = window.setTimeout(() => {
+      const currentGame = new Chess(fen);
+      if (currentGame.turn() !== "b" || currentGame.isGameOver()) {
+        setBotThinking(false);
+        return;
+      }
+      const bookMove = chooseOpeningMove(currentGame, moves, selectedBot);
+      const legal = currentGame.moves({ verbose: true }) as any[];
+      const candidate = bookMove ?? legal[Math.floor(Math.random() * legal.length)];
+      setBotThinking(false);
+      if (candidate) handleMove(candidate.from, candidate.to, true);
+    }, 2500);
+    return () => window.clearTimeout(safetyTimer);
+    // handleMove is the current move boundary for this state snapshot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [botThinking, fen, activeTab, vsBot, currentIndex, moves.length, selectedBot.id]);
+
+  useEffect(() => {
+    if (vsBot && activeTab === "play" && currentIndex === moves.length) return;
+    setBotThinking(false);
+    engineRequestRef.current = null;
+  }, [activeTab, currentIndex, moves.length, vsBot]);
+
   const handleMove = (from: string, to: string, isBot = false) => {
     if (vsBot && !isBot && game.turn() !== "w") return;
     if (isBot && botFallbackRef.current) {
@@ -228,7 +257,12 @@ export default function Home() {
   };
 
   const newGame = (bot: BotProfile = selectedBot) => {
-    setSelectedBot(bot); setFen(START_FEN); setMoves([]); setSnapshots([]); setCurrentIndex(0); setLastMove(null); setFloatingBadge(null); setEngineEvaluation(0); setEngineMate(null); setWhiteClock(clockMode === "1 + 0" ? 60 : clockMode === "3 + 2" ? 180 : clockMode === "10 + 0" ? 600 : 1800); setBlackClock(clockMode === "1 + 0" ? 60 : clockMode === "3 + 2" ? 180 : clockMode === "10 + 0" ? 600 : 1800); setBotThinking(false); setClockRunning(false);
+    if (botFallbackRef.current) {
+      window.clearTimeout(botFallbackRef.current);
+      botFallbackRef.current = null;
+    }
+    engineRequestRef.current = null;
+    setSelectedBot(bot); setFen(START_FEN); setMoves([]); setSnapshots([]); setCurrentIndex(0); setLastMove(null); setFloatingBadge(null); setPendingEngineMove(null); setEngineEvaluation(0); setEngineMate(null); setWhiteClock(clockMode === "1 + 0" ? 60 : clockMode === "3 + 2" ? 180 : clockMode === "10 + 0" ? 600 : 1800); setBlackClock(clockMode === "1 + 0" ? 60 : clockMode === "3 + 2" ? 180 : clockMode === "10 + 0" ? 600 : 1800); setBotThinking(false); setClockRunning(false);
   };
 
   const setClock = (mode: string) => { setClockMode(mode); if (mode === "1 + 0") { setWhiteClock(60); setBlackClock(60); } else if (mode === "3 + 2") { setWhiteClock(180); setBlackClock(180); } else if (mode === "10 + 0") { setWhiteClock(600); setBlackClock(600); } else { setWhiteClock(1800); setBlackClock(1800); } };
