@@ -51,6 +51,7 @@ export default function Home() {
   const engineReadyRef = useRef(false);
   const engineRequestRef = useRef<"bot" | "analysis" | null>(null);
   const engineSideRef = useRef<"w" | "b">("w");
+  const botFallbackRef = useRef<number | null>(null);
 
   const game = useMemo(() => new Chess(fen), [fen]);
   const checkSquare = useMemo(() => {
@@ -110,8 +111,13 @@ export default function Home() {
           engineRequestRef.current = null;
         }
       };
+      worker.onerror = () => {
+        engineReadyRef.current = false;
+        engineRequestRef.current = null;
+        setBotThinking(false);
+      };
       worker.postMessage("uci");
-      return () => { worker.terminate(); engineRef.current = null; engineReadyRef.current = false; };
+      return () => { worker.terminate(); engineRef.current = null; engineReadyRef.current = false; if (botFallbackRef.current) window.clearTimeout(botFallbackRef.current); };
     } catch { return undefined; }
     // The engine worker is deliberately created once for the whole session.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -154,7 +160,7 @@ export default function Home() {
     setBotThinking(true);
     const timer = window.setTimeout(() => {
       const openingMove = chooseOpeningMove(game, moves, selectedBot);
-      if (openingMove && Math.random() < (selectedBot.id >= 2000 ? .9 : selectedBot.id >= 1600 ? .78 : .58)) {
+      if (openingMove) {
         setBotThinking(false);
         handleMove(openingMove.from, openingMove.to, true);
       } else if (engineRef.current && engineReadyRef.current) {
@@ -165,6 +171,16 @@ export default function Home() {
         engineRef.current.postMessage("stop");
         engineRef.current.postMessage(`position fen ${fen}`);
         engineRef.current.postMessage(`go depth ${selectedBot.id >= 2000 ? 14 : selectedBot.id >= 1200 ? 11 : 8}`);
+        botFallbackRef.current = window.setTimeout(() => {
+          const fallbackGame = new Chess(fen);
+          if (fallbackGame.turn() !== "b" || fallbackGame.isGameOver()) return;
+          engineRequestRef.current = null;
+          botFallbackRef.current = null;
+          const legal = fallbackGame.moves({ verbose: true }) as any[];
+          const candidate = legal[Math.floor(Math.random() * legal.length)];
+          setBotThinking(false);
+          if (candidate) handleMove(candidate.from, candidate.to, true);
+        }, 5000);
       }
       else {
         const legal = game.moves({ verbose: true }) as any[];
@@ -180,6 +196,10 @@ export default function Home() {
 
   const handleMove = (from: string, to: string, isBot = false) => {
     if (vsBot && !isBot && game.turn() !== "w") return;
+    if (isBot && botFallbackRef.current) {
+      window.clearTimeout(botFallbackRef.current);
+      botFallbackRef.current = null;
+    }
     const next = new Chess(fen);
     try {
       const move = next.move({ from, to, promotion: "q" });
@@ -192,7 +212,8 @@ export default function Home() {
       setCurrentIndex(branchedMoves.length + 1);
       setFen(next.fen());
       setLastMove({ from: move.from, to: move.to });
-      setFloatingBadge({ id: Date.now(), square: move.to, label: move.san.includes("#") ? "M#" : move.san.includes("+") ? "+" : classification === "Brilliant" ? "!!" : classification === "Blunder" ? "??" : classification === "Great" ? "!" : "·", tone: classification === "Blunder" ? "red" : classification === "Brilliant" ? "mint" : move.san.includes("+") ? "amber" : "blue" });
+      const badgeLabel = move.san.includes("#") ? "M#" : move.san.includes("+") ? "+" : classification === "Brilliant" ? "!!" : classification === "Blunder" ? "??" : classification === "Great" ? "!" : null;
+      setFloatingBadge(badgeLabel ? { id: Date.now(), square: move.to, label: badgeLabel, tone: classification === "Blunder" ? "red" : classification === "Brilliant" ? "mint" : move.san.includes("+") ? "amber" : "blue" } : null);
       playMoveSound(Boolean(move.captured), next.isCheck());
       setClockRunning(true);
     } catch { /* Chessboard only emits legal moves, but keep the boundary defensive. */ }
@@ -268,4 +289,25 @@ function chooseOpeningMove(game: Chess, moves: PlayedMove[], bot: BotProfile) {
   const legal = game.moves({ verbose: true }) as any[];
   return preferred.map((san) => legal.find((move) => move.san.replace(/[+#]/g, "") === san)).find(Boolean) ?? null;
 }
-function playMoveSound(capture: boolean, check: boolean) { if (typeof window === "undefined") return; try { const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext; const context = new AudioContextClass(); const oscillator = context.createOscillator(); const gain = context.createGain(); oscillator.type = "sine"; oscillator.frequency.value = check ? 540 : capture ? 210 : 320; gain.gain.setValueAtTime(.0001, context.currentTime); gain.gain.exponentialRampToValueAtTime(.04, context.currentTime + .008); gain.gain.exponentialRampToValueAtTime(.0001, context.currentTime + .11); oscillator.connect(gain); gain.connect(context.destination); oscillator.start(); oscillator.stop(context.currentTime + .12); } catch { /* Audio is a progressive enhancement. */ } }
+let moveAudioContext: AudioContext | null = null;
+function playMoveSound(capture: boolean, check: boolean) {
+  if (typeof window === "undefined") return;
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    moveAudioContext ??= new AudioContextClass();
+    if (moveAudioContext.state === "suspended") void moveAudioContext.resume();
+    const context = moveAudioContext;
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(check ? 540 : capture ? 210 : 320, context.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(check ? 680 : capture ? 150 : 260, context.currentTime + .12);
+    gain.gain.setValueAtTime(.0001, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(.055, context.currentTime + .008);
+    gain.gain.exponentialRampToValueAtTime(.0001, context.currentTime + .14);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime + .15);
+  } catch { /* Audio is a progressive enhancement. */ }
+}
